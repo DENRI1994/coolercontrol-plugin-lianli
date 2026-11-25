@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
 """
-Lian Li UNI FAN SL Fan Controller for Linux / CoolerControl
-Controls fan speeds on Lian Li UNI HUB SL v1.8 (0cf2:a100 / 0cf2:7750) via USB HID reports.
+Lian Li UNI FAN SL Fan Controller & Hardware Monitor for Linux / CoolerControl
+Controls fan speed and reads real-time RPM on Lian Li UNI HUB SL v1.8 (0cf2:a100 / 0cf2:7750).
 """
 
 import sys
 import os
 import glob
+import time
+import fcntl
 
 STATE_FILE = "/tmp/lianli_fan_duty"
+
+def _IOC(dir_flag, typ, nr, size):
+    return (dir_flag << 30) | (size << 16) | (typ << 8) | nr
+
+# HIDIOCGINPUT(65) = ioctl to read HID Input Report with report ID 0xE0 + 64 bytes
+HIDIOCGINPUT = _IOC(3, ord("H"), 0x0A, 65)
 
 def get_device():
     for uevent in glob.glob("/sys/class/hidraw/hidraw*/device/uevent"):
@@ -30,14 +38,20 @@ def set_duty(duty):
         sys.exit(1)
     
     # SL v1 speed calculation: (800 + 11*pct) // 19
+    # 0% -> byte 42 (~800-1000 RPM)
+    # 50% -> byte 71 (~1350 RPM)
+    # 100% -> byte 100 (~1850-1900 RPM)
     speed_byte = int(800.0 + 11.0 * float(duty)) // 19
     try:
-        with open(dev_path, "wb") as f:
+        with open(dev_path, "r+b", buffering=0) as f:
             for ch in range(4):
-                # Put channel into manual mode (register 0x31)
+                # Disable Motherboard RPM Sync & set manual mode
+                # High nibble selects channel: 0x10 << ch
                 f.write(bytes([0xE0, 0x10, 0x31, 0x10 << ch]))
-                # Send speed byte
+                time.sleep(0.02)
+                # Send target speed byte for channel
                 f.write(bytes([0xE0, 0x20 + ch, 0x00, speed_byte]))
+                time.sleep(0.02)
     except Exception as e:
         print(f"Error writing to {dev_path}: {e}", file=sys.stderr)
         sys.exit(1)
@@ -60,24 +74,40 @@ def get_duty():
             pass
     return 40
 
-def get_rpm():
-    duty = get_duty()
-    if duty == 0:
+def get_rpm(channel=0):
+    dev_path = get_device()
+    if not dev_path:
         return 0
-    # Lian Li SL v1 fans operate from ~800 RPM to ~1900 RPM
-    return int(800 + (1900 - 800) * (duty / 100.0))
+    try:
+        with open(dev_path, "r+b", buffering=0) as f:
+            buf = bytes([0xE0]) + bytes(64)
+            res = fcntl.ioctl(f.fileno(), HIDIOCGINPUT, buf)
+            # Channel 0: bytes 1, 2 (big-endian 16-bit integer)
+            offset = 1 + channel * 2
+            rpm = res[offset] * 256 + res[offset + 1]
+            return rpm
+    except Exception:
+        # Fallback to estimated RPM if hardware read fails
+        duty = get_duty()
+        return int(800 + (1900 - 800) * (duty / 100.0))
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--get":
         print(get_duty())
     elif len(sys.argv) > 1 and sys.argv[1] == "--get-rpm":
-        print(get_rpm())
+        print(get_rpm(0))
     elif len(sys.argv) > 1 and sys.argv[1] == "--set":
         if len(sys.argv) > 2:
             set_duty(sys.argv[2])
         else:
             print("Error: Missing duty argument", file=sys.stderr)
             sys.exit(1)
+    elif len(sys.argv) > 1 and sys.argv[1] == "--status":
+        dev = get_device()
+        print(f"Device: {dev}")
+        print(f"Target Duty: {get_duty()}%")
+        for c in range(4):
+            print(f"Channel {c+1} RPM: {get_rpm(c)}")
     else:
-        print(f"Usage: {sys.argv[0]} --get | --get-rpm | --set <duty>")
+        print(f"Usage: {sys.argv[0]} --get | --get-rpm | --set <duty> | --status")
         sys.exit(1)
