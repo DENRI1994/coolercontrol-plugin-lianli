@@ -1,0 +1,20 @@
+{
+  "devices": [
+    {
+      "id": "lianli_sl_hub",
+      "label": "Lian Li Uni Hub SL",
+      "channels": [
+        {
+          "id": "sl_fans",
+          "label": "Lian Li SL Fans",
+          "commands": {
+            "get_duty": "/usr/local/bin/lianli-fans --get",
+            "get_rpm": "/usr/local/bin/lianli-fans --get-rpm",
+            "set_duty": "/usr/local/bin/lianli-fans --set {duty}"
+          }
+        }
+      ],
+      "temps": []
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""
+Lian Li UNI FAN SL Fan Controller for Linux / CoolerControl
+Controls fan speeds on Lian Li UNI HUB SL v1.8 (0cf2:a100 / 0cf2:7750) via USB HID reports.
+"""
+
+import sys
+import os
+import glob
+
+STATE_FILE = "/tmp/lianli_fan_duty"
+
+def get_device():
+    for uevent in glob.glob("/sys/class/hidraw/hidraw*/device/uevent"):
+        try:
+            with open(uevent) as f:
+                content = f.read()
+                if "0CF2:0000A100" in content or "0CF2:00007750" in content:
+                    parts = uevent.split("/")
+                    return "/dev/" + parts[4]
+        except Exception:
+            continue
+    return None
+
+def set_duty(duty):
+    duty = max(0, min(100, int(duty)))
+    dev_path = get_device()
+    if not dev_path:
+        print("Error: Lian Li Hub not found", file=sys.stderr)
+        sys.exit(1)
+    
+    # SL v1 speed calculation: (800 + 11*pct) // 19
+    speed_byte = int(800.0 + 11.0 * float(duty)) // 19
+    try:
+        with open(dev_path, "wb") as f:
+            for ch in range(4):
+                # Put channel into manual mode (register 0x31)
+                f.write(bytes([0xE0, 0x10, 0x31, 0x10 << ch]))
+                # Send speed byte
+                f.write(bytes([0xE0, 0x20 + ch, 0x00, speed_byte]))
+    except Exception as e:
+        print(f"Error writing to {dev_path}: {e}", file=sys.stderr)
+        sys.exit(1)
+            
+    try:
+        with open(STATE_FILE, "w") as f:
+            f.write(str(duty))
+    except Exception:
+        pass
+    print(duty)
+
+def get_duty():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE) as f:
+                val = f.read().strip()
+                if val.isdigit():
+                    return int(val)
+        except Exception:
+            pass
+    return 40
+
+def get_rpm():
+    duty = get_duty()
+    if duty == 0:
+        return 0
+    # Lian Li SL v1 fans operate from ~800 RPM to ~1900 RPM
+    return int(800 + (1900 - 800) * (duty / 100.0))
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--get":
+        print(get_duty())
+    elif len(sys.argv) > 1 and sys.argv[1] == "--get-rpm":
+        print(get_rpm())
+    elif len(sys.argv) > 1 and sys.argv[1] == "--set":
+        if len(sys.argv) > 2:
+            set_duty(sys.argv[2])
+        else:
+            print("Error: Missing duty argument", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"Usage: {sys.argv[0]} --get | --get-rpm | --set <duty>")
+        sys.exit(1)
