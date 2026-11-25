@@ -4,27 +4,26 @@ This plugin integrates the **Lian Li UNI HUB SL v1.8 / v1** controller (`0cf2:a1
 
 ## Features
 
-- **Direct Fan Control**: Control fan duty cycle (0–100%) via USB HID output reports.
-- **CoolerControl GUI Integration**: Manage fan speeds, create custom temperature curves (e.g., based on AMD Ryzen `k10temp` / `Tctl` or GPU temperature), and set profiles.
-- **RPM Reporting**: Displays estimated fan RPM (800 – 1900 RPM) directly in CoolerControl graphs.
-- **Multi-channel sync**: Automatically applies speeds to all connected SL fan channels on the hub.
+- **Direct Fan Speed Control**: Control fan duty cycle (0–100%) via USB HID output reports.
+- **Real-Time Hardware RPM Reporting**: Reads accurate, real-time fan RPM directly from the controller hardware via HID Input Reports (`HIDIOCGINPUT`).
+- **CoolerControl GUI Integration**: Manage fan speeds, create custom temperature curves (based on CPU Tctl, Liquid Coolant, or GPU Temp), and set Mix Profiles.
+- **Multi-channel Sync**: Automatically controls all connected SL fan channels on the hub simultaneously.
 
 ## Installation
 
-Clone this repository and run the installation script:
-
 ```bash
-cd coolercontrol-lianli-plugin
+git clone https://github.com/DENRI1994/coolercontrol-plugin-lianli.git
+cd coolercontrol-plugin-lianli
 sudo ./install.sh
 ```
 
-Then open CoolerControl:
-1. Navigate to **Devices**.
-2. Look for **Lian Li Uni Hub SL** -> **Lian Li SL Fans**.
-3. Create or assign a Profile / Temperature Curve.
+Then in CoolerControl:
+1. Under **Devices**, you will see **Lian Li Uni Hub SL** with the channel **Lian Li SL Fans**.
+2. Create or assign a Profile / Temperature Curve (e.g. Graph or Mix Profile).
 
 ## Protocol Details
 
 Uses report ID `0xE0` on `/dev/hidraw*`:
-- **Mode Register**: `0x31` (`[0xE0, 0x10, 0x31, 0x10 << channel]`) for manual mode.
+- **Mode Register**: `0x31` (`[0xE0, 0x10, 0x31, 0x10 << channel]`) to disable Motherboard RPM Sync and enable manual USB mode.
 - **Speed Register**: `0x20 + channel` (`[0xE0, 0x20 + channel, 0x00, speed_byte]`) where `speed_byte = (800 + 11 * percent) / 19`.
+- **RPM Readback**: `ioctl(fd, HIDIOCGINPUT, [0xE0, ...])`, reading 16-bit big-endian RPM for each channel directly from hardware.
